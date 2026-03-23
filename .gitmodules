@@ -1,3 +1,9 @@
 [submodule "3rd_party/asio"]
 	path = 3rd_party/asio
 	url = https://github.com/chriskohlhoff/asio.git
+[submodule "3rd_party/openvdb"]
+	path = 3rd_party/openvdb
+	url = git@github.com:AcademySoftwareFoundation/openvdb.git
+[submodule "3rd_party/oneTBB"]
+	path = 3rd_party/oneTBB
+	url = git@github.com:uxlfoundation/oneTBB.git
