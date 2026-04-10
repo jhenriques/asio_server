@@ -13,12 +13,21 @@ blue=$(tput setaf 4)
 # disables commands outputs:
 set +x
 
+BUILD_TYPE=Release
+
+MAC_CLANG=`xcrun --sdk macosx --find clang++`
+MAC_SDK_PATH=`xcrun --sdk macosx --show-sdk-path`
+MAC_BUILD_TARGET=arm64
+MAC_TARGET=arm64-apple-darwin22.1.0
+
 IOS_CLANG=`xcrun --sdk iphoneos --find clang++`
 IOS_SDK_PATH=`xcrun --sdk iphoneos --show-sdk-path`
 
 
-# I need this to be able to build for
-# mac (server), ios (client) ?
+BUILD_FLAGS=(-O3 -ffast-math -flto)
+LINKING_FLAGS=(-flto)
+LINKING_FLAGS+=(-Wl -rpath @executable_path/.)
+LINKING_FLAGS+=(-Wl -rpath @executable_path/../Frameworks/.)
 
 
 # Dependencies:
@@ -27,45 +36,47 @@ didUpdate=`git submodule update --init --recursive`
 printf "${green}DONE!${normal}\n"
 
 
-# printf ":: Building oneTBB... "
-# pushd 3rd_party/oneTBB
-# if [ ! -e mac/lib/libtbb.a ]; then
-#   mkdir -p build_mac
-#   pushd build_mac
+# Might want to grab jemallopc
 
-#     cmake -S .. -DCMAKE_CXX_STANDARD=20 -DCMAKE_CXX_STANDARD_REQUIRED=ON -DTBB_STRICT=OFF -DTBB_ENABLE_IPO=OFF  \
-#       -DCMAKE_CXX_EXTENSIONS=OFF -DTBB_TEST=OFF -DBUILD_SHARED_LIBS=OFF -DCMAKE_INSTALL_PREFIX=../mac &> /dev/null
+printf ":: Building oneTBB... "
+pushd 3rd_party/oneTBB
+if [ ! -e mac/lib/libtbb.a ]; then
+  mkdir -p build_mac
+  pushd build_mac
 
-#     cmake --build . -j12 --config Release &> /dev/null
-#     cmake --install . &> /dev/null
+    cmake -S .. -DCMAKE_CXX_STANDARD=20 -DCMAKE_CXX_STANDARD_REQUIRED=ON -DTBB_STRICT=OFF -DTBB_ENABLE_IPO=OFF  \
+      -DCMAKE_CXX_EXTENSIONS=OFF -DTBB_TEST=OFF -DBUILD_SHARED_LIBS=OFF -DCMAKE_INSTALL_PREFIX=../mac &> /dev/null
 
-#     if [[ ! $? -eq 0 ]]; then
-#       printf "${red}MAC FAILED!${normal}\n";            
-#       exit 1
-#     fi
+    cmake --build . -j12 --config Release &> /dev/null
+    cmake --install . &> /dev/null
 
-#     printf "${green}[MAC]${normal}";
-#   popd
-# fi
-# if [ ! -e ios/lib/libtbb.a ]; then
-#   mkdir -p build_ios
-#   pushd build_ios
+    if [[ ! $? -eq 0 ]]; then
+      printf "${red}MAC FAILED!${normal}\n";            
+      exit 1
+    fi
+  popd
+fi
+printf "${green}[MAC]${normal}";
 
-#     cmake -S .. -GXcode -DCMAKE_CXX_STANDARD=20 -DCMAKE_CXX_STANDARD_REQUIRED=ON -DTBB_STRICT=OFF -DTBB_ENABLE_IPO=OFF  \
-#       -DCMAKE_CXX_EXTENSIONS=OFF -DTBB_TEST=OFF -DBUILD_SHARED_LIBS=OFF -DCMAKE_INSTALL_PREFIX=../ios &> /dev/null
+if [ ! -e ios/lib/libtbb.a ]; then
+  mkdir -p build_ios
+  pushd build_ios
 
-#     xcodebuild -project TBB.xcodeproj -sdk iphoneos -arch arm64 -target tbb -target tbbmalloc -configuration Release -quiet &> /dev/null
-#     cmake --install . &> /dev/null
+    cmake -S .. -GXcode -DCMAKE_CXX_STANDARD=20 -DCMAKE_CXX_STANDARD_REQUIRED=ON -DTBB_STRICT=OFF -DTBB_ENABLE_IPO=OFF  \
+      -DCMAKE_CXX_EXTENSIONS=OFF -DTBB_TEST=OFF -DBUILD_SHARED_LIBS=OFF -DCMAKE_INSTALL_PREFIX=../ios &> /dev/null
 
-#     if [[ ! $? -eq 0 ]]; then
-#       printf "${red}IOS FAILED!${normal}\n";            
-#       exit 1
-#     fi
-#     printf "${green}[IOS]${normal}";
-#   popd
-# fi
-# popd
-# printf "${green} DONE!${normal}\n";
+    xcodebuild -project TBB.xcodeproj -sdk iphoneos -arch arm64 -target tbb -target tbbmalloc -configuration Release -quiet &> /dev/null
+    cmake --install . &> /dev/null
+
+    if [[ ! $? -eq 0 ]]; then
+      printf "${red}IOS FAILED!${normal}\n";            
+      exit 1
+    fi
+  popd
+fi
+printf "${green}[IOS]${normal}";
+popd
+printf "${green} DONE!${normal}\n";
 
 
 printf ":: Building Boost... "
@@ -155,4 +166,71 @@ printf "${green}[IOS]${normal}"
 
 popd
 printf "${green} DONE!${normal}\n"
+
+
+# FINALLY, THE MAIN TARGETS:
+BUILD_FOLDER="build"
+SRC_FOLDER="../src"
+
+if [ ! -d "$BUILD_FOLDER" ]; then
+    mkdir -p $BUILD_FOLDER
+fi
+pushd $BUILD_FOLDER
+
+  printf ":: Building Server..."
+    $MAC_CLANG ${=BUILD_FLAGS} -std=c++20 -fPIC -fobjc-arc -isysroot $MAC_SDK_PATH --target=$MAC_TARGET \
+      -I../3rd_party/asio/include/ -I../3rd_party/oneTBB/include -I../3rd_party/openvdb/include \
+      -Wno-format-security -c $SRC_FOLDER/server.cpp -o macOS_server.o
+
+    if [[ ! $? -eq 0 ]]; then
+      printf "${red}MAC FAILED COMPILATION!${normal}\n"
+      exit 1
+    fi
+
+    $MAC_CLANG ${=BUILD_FLAGS} ${=LINKING_FLAGS} -std=c++20 -fPIC -fobjc-arc -isysroot $MAC_SDK_PATH --target=$MAC_TARGET \
+      -L../3rd_party/openvdb/lib \
+      -lopenvdb \
+      macOS_server.o -o server
+
+    if [[ ! $? -eq 0 ]]; then
+      printf "${red}MAC FAILED LINKING!${normal}\n"
+      exit 1
+    fi
+
+    printf "${green}[MAC]${normal}"
+  printf "${green} DONE!${normal}\n"
+
+
+  printf ":: Building Client..."
+    $MAC_CLANG ${=BUILD_FLAGS} -std=c++20 -fPIC -fobjc-arc -isysroot $MAC_SDK_PATH --target=$MAC_TARGET \
+      -I../3rd_party/asio/include/ -I../3rd_party/oneTBB/include -I../3rd_party/openvdb/include \
+      -Wno-format-security -c $SRC_FOLDER/client.cpp -o macOS_client.o
+
+    if [[ ! $? -eq 0 ]]; then
+      printf "${red}MAC FAILED COMPILATION!${normal}\n"
+      exit 1
+    fi
+
+    $MAC_CLANG ${=BUILD_FLAGS} ${=LINKING_FLAGS} -std=c++20 -fPIC -fobjc-arc -isysroot $MAC_SDK_PATH --target=$MAC_TARGET \
+      -L../3rd_party/openvdb/lib \
+      -lopenvdb \
+      macOS_client.o -o client
+
+    if [[ ! $? -eq 0 ]]; then
+      printf "${red}MAC FAILED LINKING!${normal}\n"
+      exit 1
+    fi
+
+    printf "${green}[MAC]${normal}"
+  printf "${green} DONE!${normal}\n"
+
+popd
+
+mkdir -p binaries
+cp $BUILD_FOLDER/server binaries
+cp $BUILD_FOLDER/client binaries
+
+cp 3rd_party/openvdb/lib/libopenvdb.13.0.dylib binaries
+
+popd #$PARENT_PATH
 
