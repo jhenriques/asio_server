@@ -132,9 +132,11 @@ if [ ! -e mac/lib/libopenvdb.a ]; then
     cmake -S .. -DTBB_INCLUDEDIR=$PARENT_PATH/3rd_party/oneTBB/mac/include -DTBB_LIBRARYDIR=$PARENT_PATH/3rd_party/oneTBB/mac/lib \
       -DBoost_DIR=$PARENT_PATH/3rd_party/boost/mac/lib/cmake/Boost-1.91.0 \
       -DCMAKE_CXX_STANDARD=20 -DCMAKE_CXX_STANDARD_REQUIRED=ON -DCMAKE_CXX_EXTENSIONS=OFF -DOPENVDB_BUILD_UNITTESTS=OFF \
+      -DUSE_NANOVDB=ON -DOPENVDB_BUILD_NANOVDB=ON -DNANOVDB_USE_OPENVDB=ON -DNANOVDB_BUILD_EXAMPLES=OFF -DNANOVDB_BUILD_UNITTESTS=OFF \
+      -DNANOVDB_USE_CUDA=OFF -DNANOVDB_USE_TBB=ON -DNANOVDB_USE_BLOSC=OFF \
       -DUSE_BLOSC=OFF -DOPENVDB_BUILD_BINARIES=OFF -DOPENVDB_ENABLE_UNINSTALL=OFF -DCMAKE_INSTALL_PREFIX=../mac \
-      -DUSE_STATIC_DEPENDENCIES=ON -DBUILD_SHARED_LIBS=ON -DUSE_BLOSC=OFF -DUSE_ZLIB=OFF &> /dev/null
-    cmake --build . -j12 --config Release &> /dev/null
+      -DUSE_STATIC_DEPENDENCIES=ON -DBUILD_SHARED_LIBS=ON -DUSE_BLOSC=OFF -DUSE_ZLIB=OFF # &> /dev/null
+    cmake --build . -j12 --config Release # &> /dev/null
     cmake --install . &> /dev/null
 
     if [[ ! $? -eq 0 ]]; then
@@ -145,24 +147,24 @@ if [ ! -e mac/lib/libopenvdb.a ]; then
 fi
 printf "${green}[MAC]${normal}"
 
-if [ ! -e ios/lib/libopenvdb.a ]; then
+# if [ ! -e ios/lib/libopenvdb.a ]; then
 
-  mkdir -p build_ios
-  pushd build_ios
+#   mkdir -p build_ios
+#   pushd build_ios
 
-    # same as mac:
-    cmake -S .. -GXcode -DTBB_INCLUDEDIR=$PARENT_PATH/3rd_party/oneTBB/ios/include -DTBB_LIBRARYDIR=$PARENT_PATH/3rd_party/oneTBB/ios/lib \
-      -DBoost_DIR=$PARENT_PATH/3rd_party/boost/ios/lib/cmake/Boost-1.91.0 \
-      -DCMAKE_CXX_STANDARD=20 -DCMAKE_CXX_STANDARD_REQUIRED=ON -DCMAKE_CXX_EXTENSIONS=OFF -DOPENVDB_BUILD_UNITTESTS=OFF \
-      -DUSE_BLOSC=OFF -DOPENVDB_BUILD_BINARIES=OFF -DOPENVDB_ENABLE_UNINSTALL=OFF -DCMAKE_INSTALL_PREFIX=../ios \
-      -DUSE_STATIC_DEPENDENCIES=ON -DBUILD_SHARED_LIBS=OFF -DUSE_BLOSC=OFF -DUSE_ZLIB=OFF -DBoost_USE_STATIC_RUNTIME=ON &> /dev/null
+#     # same as mac:
+#     cmake -S .. -GXcode -DTBB_INCLUDEDIR=$PARENT_PATH/3rd_party/oneTBB/ios/include -DTBB_LIBRARYDIR=$PARENT_PATH/3rd_party/oneTBB/ios/lib \
+#       -DBoost_DIR=$PARENT_PATH/3rd_party/boost/ios/lib/cmake/Boost-1.91.0 \
+#       -DCMAKE_CXX_STANDARD=20 -DCMAKE_CXX_STANDARD_REQUIRED=ON -DCMAKE_CXX_EXTENSIONS=OFF -DOPENVDB_BUILD_UNITTESTS=OFF \
+#       -DUSE_BLOSC=OFF -DOPENVDB_BUILD_BINARIES=OFF -DOPENVDB_ENABLE_UNINSTALL=OFF -DCMAKE_INSTALL_PREFIX=../ios \
+#       -DUSE_STATIC_DEPENDENCIES=ON -DBUILD_SHARED_LIBS=OFF -DUSE_BLOSC=OFF -DUSE_ZLIB=OFF -DBoost_USE_STATIC_RUNTIME=ON &> /dev/null
 
-    xcodebuild -project openVDB.xcodeproj -sdk iphoneos -arch arm64 -target install \
-      CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_STYLE=Manual -configuration Release -quiet &> /dev/null
-    cmake --install . &> /dev/null
-  popd
-fi
-printf "${green}[IOS]${normal}"
+#     xcodebuild -project openVDB.xcodeproj -sdk iphoneos -arch arm64 -target install \
+#       CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_STYLE=Manual -configuration Release -quiet &> /dev/null
+#     cmake --install . &> /dev/null
+#   popd
+# fi
+# printf "${green}[IOS]${normal}"
 
 popd
 printf "${green} DONE!${normal}\n"
@@ -179,7 +181,7 @@ pushd $BUILD_FOLDER
 
   printf ":: Building Server..."
     $MAC_CLANG ${=BUILD_FLAGS} -std=c++20 -fPIC -fobjc-arc -isysroot $MAC_SDK_PATH --target=$MAC_TARGET \
-      -I../3rd_party/asio/include/ -I../3rd_party/oneTBB/include -I../3rd_party/openvdb/include \
+      -I../3rd_party/asio/include/ -I../3rd_party/oneTBB/include -I../3rd_party/openvdb/mac/include \
       -Wno-format-security -c $SRC_FOLDER/server.cpp -o macOS_server.o
 
     if [[ ! $? -eq 0 ]]; then
@@ -188,7 +190,7 @@ pushd $BUILD_FOLDER
     fi
 
     $MAC_CLANG ${=BUILD_FLAGS} ${=LINKING_FLAGS} -std=c++20 -fPIC -fobjc-arc -isysroot $MAC_SDK_PATH --target=$MAC_TARGET \
-      -L../3rd_party/openvdb/lib \
+      -L../3rd_party/openvdb/mac/lib \
       -lopenvdb \
       macOS_server.o -o server
 
@@ -203,7 +205,7 @@ pushd $BUILD_FOLDER
 
   printf ":: Building Client..."
     $MAC_CLANG ${=BUILD_FLAGS} -std=c++20 -fPIC -fobjc-arc -isysroot $MAC_SDK_PATH --target=$MAC_TARGET \
-      -I../3rd_party/asio/include/ -I../3rd_party/oneTBB/include -I../3rd_party/openvdb/include \
+      -I../3rd_party/asio/include/ -I../3rd_party/oneTBB/include -I../3rd_party/openvdb/mac/include \
       -Wno-format-security -c $SRC_FOLDER/client.cpp -o macOS_client.o
 
     if [[ ! $? -eq 0 ]]; then
@@ -212,7 +214,7 @@ pushd $BUILD_FOLDER
     fi
 
     $MAC_CLANG ${=BUILD_FLAGS} ${=LINKING_FLAGS} -std=c++20 -fPIC -fobjc-arc -isysroot $MAC_SDK_PATH --target=$MAC_TARGET \
-      -L../3rd_party/openvdb/lib \
+      -L../3rd_party/openvdb/mac/lib \
       -lopenvdb \
       macOS_client.o -o client
 
@@ -230,7 +232,7 @@ mkdir -p binaries
 cp $BUILD_FOLDER/server binaries
 cp $BUILD_FOLDER/client binaries
 
-cp 3rd_party/openvdb/lib/libopenvdb.13.0.dylib binaries
+cp 3rd_party/openvdb/build_mac/openvdb/openvdb/libopenvdb.13.0.dylib binaries
 
 popd #$PARENT_PATH
 
