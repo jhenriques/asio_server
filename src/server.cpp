@@ -6,6 +6,13 @@
 
 // #include "memory.cpp"
 
+// Session stuff:
+struct Session
+{
+    asio::ip::tcp::socket *socket;
+};
+
+
 namespace
 {
     asio::io_context *io_context = nullptr;
@@ -14,17 +21,44 @@ namespace
     openvdb::FloatGrid::Ptr test_grid;
 
     std::vector<char> grid_buffer;
+
+    std::vector<Session> sessions;
+}
+
+void session_read(Session &session);
+
+void read_handler(const asio::error_code &error, std::size_t bytes_transferred)
+{
+    if (!error)
+    {
+        std::cout << " bytes read: " << bytes_transferred << std::endl;
+        session_read(session);
+    }
+    else
+    {
+       std::cout << "Participant disconnected." << std::endl; 
+    }
+}
+
+void session_read(Session &session)
+{
+    asio::streambuf buffer;
+    async_read(session.socket, buffer, read_handler);
 }
 
 
-void start_accept();
 
+void start_accept();
 
 void accept_handler(asio::ip::tcp::socket *socket, const asio::error_code& error)
 {
     if (!error)
     {
         std::cout << "accepted connection!" << std::endl;
+
+        sessions.push_back({.socket = std::move(socket)})
+
+        session_read(session);
     }
 
     start_accept();
@@ -34,9 +68,10 @@ void start_accept()
 {
     asio::ip::tcp::socket socket(*io_context);
     acceptor->async_accept(socket, std::bind(accept_handler, &socket, asio::placeholders::error));
-
-        
 }
+
+
+
 
 int main(int argc, char **argv)
 {
