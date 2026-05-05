@@ -4,6 +4,8 @@
 
 #include "openvdb_utils.hpp"
 
+using namespace std::placeholders;
+
 // #include "memory.cpp"
 
 // Session stuff:
@@ -27,7 +29,7 @@ namespace
 
 void session_read(Session &session);
 
-void read_handler(const asio::error_code &error, std::size_t bytes_transferred)
+void read_handler(Session &session, const asio::error_code &error, std::size_t bytes_transferred)
 {
     if (!error)
     {
@@ -36,29 +38,28 @@ void read_handler(const asio::error_code &error, std::size_t bytes_transferred)
     }
     else
     {
-       std::cout << "Participant disconnected." << std::endl; 
+       std::cout << "Participant disconnected." << std::endl;
     }
 }
 
 void session_read(Session &session)
 {
     asio::streambuf buffer;
-    async_read(session.socket, buffer, read_handler);
+    async_read(*session.socket, buffer, std::bind(read_handler, session, _1, _2));
 }
-
 
 
 void start_accept();
 
 void accept_handler(asio::ip::tcp::socket *socket, const asio::error_code& error)
 {
+    std::cout << "accept_handler()" << std::endl;
+
     if (!error)
     {
         std::cout << "accepted connection!" << std::endl;
-
-        sessions.push_back({.socket = std::move(socket)})
-
-        session_read(session);
+        sessions.push_back({.socket = std::move(socket)});
+        session_read(sessions.back());
     }
 
     start_accept();
@@ -66,8 +67,9 @@ void accept_handler(asio::ip::tcp::socket *socket, const asio::error_code& error
 
 void start_accept()
 {
+    std::cout << "start_accept()" << std::endl;
     asio::ip::tcp::socket socket(*io_context);
-    acceptor->async_accept(socket, std::bind(accept_handler, &socket, asio::placeholders::error));
+    acceptor->async_accept(socket, std::bind(accept_handler, &socket, _1));
 }
 
 
@@ -75,28 +77,26 @@ void start_accept()
 
 int main(int argc, char **argv)
 {
-    // test for now: 
-    openvdb::initialize();
+    // // test for now: 
+    // openvdb::initialize();
 
-    test_grid = openvdb::FloatGrid::create();
-    openvdb::FloatGrid::TreeType& tree = test_grid->tree();
-    tree.setValue(openvdb::Coord(0, 0, 0), 1.0f);
-    tree.setValue(openvdb::Coord(1, 1, 1), 2.0f);
-    tree.setValue(openvdb::Coord(2, 2, 2), 3.0f);
+    // test_grid = openvdb::FloatGrid::create();
+    // openvdb::FloatGrid::TreeType& tree = test_grid->tree();
+    // tree.setValue(openvdb::Coord(0, 0, 0), 1.0f);
+    // tree.setValue(openvdb::Coord(1, 1, 1), 2.0f);
+    // tree.setValue(openvdb::Coord(2, 2, 2), 3.0f);
 
-    if (write_grid_to_buffer(test_grid, grid_buffer))
-    {
-        std::cout << "--> created a test grid with " << test_grid->memUsage() << " bytes." << std::endl;
-    }
+    // if (write_grid_to_buffer(test_grid, grid_buffer))
+    // {
+    //     std::cout << "--> created a test grid with " << test_grid->memUsage() << " bytes." << std::endl;
+    // }
     
-
-
-    // Read it back:
-    openvdb::FloatGrid::Ptr read_grid = read_grid_from_buffer(grid_buffer);
-    if (read_grid)
-    {
-        std::cout << "--> read grid with " << openvdb::tools::memUsageIfLoaded(read_grid->tree()) << " bytes." << std::endl;
-    }
+    // // Read it back:
+    // openvdb::FloatGrid::Ptr read_grid = read_grid_from_buffer(grid_buffer);
+    // if (read_grid)
+    // {
+    //     std::cout << "--> read grid with " << openvdb::tools::memUsageIfLoaded(read_grid->tree()) << " bytes." << std::endl;
+    // }
 
     // std::istringstream istr(std::string(grid_buffer.begin(), grid_buffer.end()), std::ios_base::binary);
     // openvdb::GridPtrVecPtr gridsRead = openvdb::io::Stream(istr).getGrids();
@@ -116,12 +116,16 @@ int main(int argc, char **argv)
 
 
     io_context = new asio::io_context();
-    acceptor = new asio::ip::tcp::acceptor(*io_context, 
-        asio::ip::tcp::endpoint(asio::ip::tcp::v4(), 3777));
+    acceptor = new asio::ip::tcp::acceptor(*io_context, asio::ip::tcp::endpoint(asio::ip::tcp::v4(), 47777));
 
     start_accept();
 
     io_context->run();
+
+    std::cout << "server exiting..." << std::endl;
+    
+    free(acceptor);
+    free(io_context);
 
     return 0;
 }
