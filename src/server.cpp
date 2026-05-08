@@ -11,20 +11,21 @@ using namespace std::placeholders;
 // Session stuff:
 struct Session
 {
-    asio::ip::tcp::socket *socket;
+    asio::ip::tcp::socket *socket = nullptr;
+    char data[1024];
 };
 
 
 namespace
 {
-    asio::io_context *io_context = nullptr;
+    asio::io_context io_context;
     asio::ip::tcp::acceptor *acceptor = nullptr;
 
     openvdb::FloatGrid::Ptr test_grid;
 
     std::vector<char> grid_buffer;
 
-    std::vector<Session> sessions;
+    std::vector<Session> sessions = {};
 }
 
 void session_read(Session &session);
@@ -34,32 +35,36 @@ void read_handler(Session &session, const asio::error_code &error, std::size_t b
     if (!error)
     {
         std::cout << " bytes read: " << bytes_transferred << std::endl;
-        session_read(session);
+        std::cout << " server received: " << std::string(session.data, bytes_transferred) << std::endl;
+        
+
+        // session_read(session);
     }
     else
     {
        std::cout << "Participant disconnected." << std::endl;
+
+       free(session.socket);
     }
 }
 
 void session_read(Session &session)
 {
-    asio::streambuf buffer;
-    async_read(*session.socket, buffer, std::bind(read_handler, session, _1, _2));
+    async_read(*session.socket, asio::buffer(session.data, 1024), std::bind(read_handler, session, _1, _2));
 }
 
 
 void start_accept();
 
-void accept_handler(asio::ip::tcp::socket *socket, const asio::error_code& error)
+void accept_handler(Session &session, asio::ip::tcp::socket *socket, const asio::error_code& error)
 {
     std::cout << "accept_handler()" << std::endl;
 
     if (!error)
     {
         std::cout << "accepted connection!" << std::endl;
-        sessions.push_back({.socket = std::move(socket)});
-        session_read(sessions.back());
+
+        session_read(session);
     }
 
     start_accept();
@@ -68,8 +73,12 @@ void accept_handler(asio::ip::tcp::socket *socket, const asio::error_code& error
 void start_accept()
 {
     std::cout << "start_accept()" << std::endl;
-    asio::ip::tcp::socket socket(*io_context);
-    acceptor->async_accept(socket, std::bind(accept_handler, &socket, _1));
+
+    asio::ip::tcp::socket *socket = new asio::ip::tcp::socket(io_context);
+    Session session = { socket };
+    sessions.push_back(session);
+    
+    acceptor->async_accept(*socket, std::bind(accept_handler, session, socket, _1));
 }
 
 
@@ -115,17 +124,25 @@ int main(int argc, char **argv)
     // }
 
 
-    io_context = new asio::io_context();
-    acceptor = new asio::ip::tcp::acceptor(*io_context, asio::ip::tcp::endpoint(asio::ip::tcp::v4(), 47777));
+    // io_context = new asio::io_context();
+    acceptor = new asio::ip::tcp::acceptor(io_context, asio::ip::tcp::endpoint(asio::ip::tcp::v4(), 47777));
 
     start_accept();
 
-    io_context->run();
+    io_context.run();
 
     std::cout << "server exiting..." << std::endl;
     
     free(acceptor);
-    free(io_context);
+    // free(io_context);
+
+    // for (size_t i = 0, iCount = sessions.size(); i < iCount; ++i)
+    // {
+    //     if (sessions[i].socket)
+    //     {
+    //         free(sessions[i].socket);
+    //     }
+    // }
 
     return 0;
 }
