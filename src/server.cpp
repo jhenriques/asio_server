@@ -4,6 +4,8 @@
 
 #include "openvdb_utils.hpp"
 
+#include "protocol.hpp"
+
 using namespace std::placeholders;
 
 // #include "memory.cpp"
@@ -37,13 +39,16 @@ void read_handler(Session &session, const asio::error_code &error, std::size_t b
         std::cout << " bytes read: " << bytes_transferred << std::endl;
         std::cout << " server received: " << std::string(session.data, bytes_transferred) << std::endl;
         
+        
 
-        // session_read(session);
+
+
+        session_read(session);
     }
     else
     {
        std::cout << "Participant disconnected." << std::endl;
-
+       session.socket->close();
        free(session.socket);
     }
 }
