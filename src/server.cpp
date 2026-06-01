@@ -2,6 +2,12 @@
 #include <asio.hpp>
 #include <vector>
 
+#if defined WIN32
+#include <winsock2.h>
+#else
+#include <arpa/inet.h>
+#endif
+
 #include "openvdb_utils.hpp"
 
 #include "protocol.hpp"
@@ -30,38 +36,71 @@ namespace
     std::vector<Session> sessions = {};
 }
 
-void session_read(Session &session);
+void session_read(Session *session);
 
-void read_handler(Session &session, const asio::error_code &error, std::size_t bytes_transferred)
+void disconnet_client(Session *session)
+{
+    std::cout << "Participant disconnected." << std::endl;
+   session->socket->close();
+   free(session->socket);
+}
+
+void read_text_message_header_handler(Session *session, const asio::error_code &error, std::size_t bytes_transferred)
 {
     if (!error)
     {
-        std::cout << " bytes read: " << bytes_transferred << std::endl;
-        std::cout << " server received: " << std::string(session.data, bytes_transferred) << std::endl;
-        
-        
-
-
+        std::cout << "[TEXT_MESSAGE] message size: " << bytes_transferred << std::endl;
+        // async_read(*session.socket, asio::buffer(session.data, sizeof(message_header)), std::bind(read_header_handler, session, _1, _2));
 
         session_read(session);
     }
     else
     {
-       std::cout << "Participant disconnected." << std::endl;
-       session.socket->close();
-       free(session.socket);
+        disconnet_client(session);
     }
 }
 
-void session_read(Session &session)
+void read_header_handler(Session *session, const asio::error_code &error, std::size_t bytes_transferred)
 {
-    async_read(*session.socket, asio::buffer(session.data, 1024), std::bind(read_handler, session, _1, _2));
+    if (!error)
+    {
+        std::cout << "[HEADER] bytes read: " << bytes_transferred << std::endl;
+
+        uint32_t *header_net = reinterpret_cast<uint32_t *>(session->data);
+        uint32_t header_host = ntohl(*((uint32_t *)header_net));
+        std::cout << "header type: " << header_host << std::endl;
+
+        switch (header_host)
+        {
+        case TEXT_MESSAGE:
+            {
+                async_read(*session->socket, asio::buffer(session->data, sizeof(uint32_t)), std::bind(read_text_message_header_handler, session, _1, _2));
+                break;
+            }
+        default:
+            {
+                std::cout << "non-supported protocol... disconnecting!" << std::endl;
+                disconnet_client(session);
+                break;
+            }
+        }
+    }
+    else
+    {
+        disconnet_client(session);
+    }
+}
+
+void session_read(Session *session)
+{
+    // read the header:
+    async_read(*session->socket, asio::buffer(session->data, sizeof(message_header)), std::bind(read_header_handler, session, _1, _2));
 }
 
 
 void start_accept();
 
-void accept_handler(Session &session, asio::ip::tcp::socket *socket, const asio::error_code& error)
+void accept_handler(Session *session, asio::ip::tcp::socket *socket, const asio::error_code& error)
 {
     std::cout << "accept_handler()" << std::endl;
 
@@ -80,10 +119,11 @@ void start_accept()
     std::cout << "start_accept()" << std::endl;
 
     asio::ip::tcp::socket *socket = new asio::ip::tcp::socket(io_context);
-    Session session = { socket };
-    sessions.push_back(session);
+    sessions.push_back({ socket });
+
+    std::cout << "NEW SESSION: " << (uintptr_t)sessions.back().data << std::endl;
     
-    acceptor->async_accept(*socket, std::bind(accept_handler, session, socket, _1));
+    acceptor->async_accept(*socket, std::bind(accept_handler, &sessions.back(), socket, _1));
 }
 
 

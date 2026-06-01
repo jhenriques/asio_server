@@ -27,8 +27,9 @@ void callback(const asio::error_code& /*e*/)
             if (!ec)
             {
                 std::cout << "Wrote message!" << std::endl;
-            } else {
-                
+            }
+            else 
+            {
                 std::cout << "error writing text message..." << std::endl;
                 // socket_.close();
             }
