@@ -14,12 +14,18 @@
 
 using namespace std::placeholders;
 
+using asio::ip::tcp;
+
 // #include "memory.cpp"
 
 // Session stuff:
 struct Session
 {
-    asio::ip::tcp::socket *socket = nullptr;
+    asio::ip::tcp::socket socket;
+
+    uint32_t id_buffer;
+
+    uint32_t message_size;
     char data[1024];
 };
 
@@ -41,18 +47,42 @@ void session_read(Session *session);
 void disconnet_client(Session *session)
 {
     std::cout << "Participant disconnected." << std::endl;
-   session->socket->close();
-   free(session->socket);
+    session->socket.close();
+}
+
+
+void read_text_message_body_handler(Session *session, const asio::error_code &error, std::size_t bytes_transferred)
+{
+    std::cout << "read_text_message_body_handler..." << std::endl;
+
+    if (!error)
+    {
+        std::cout << "[TEXT_MESSAGE] message body size: " << bytes_transferred << std::endl;
+
+        std::cout << "RECEIVED MESSAGE: |" << session->data << "|" << std::endl;
+
+        session_read(session);
+    }
+    else
+    {
+        disconnet_client(session);
+    }
 }
 
 void read_text_message_header_handler(Session *session, const asio::error_code &error, std::size_t bytes_transferred)
 {
+    std::cout << "read_text_message_header_handler..." << std::endl;
+
     if (!error)
     {
         std::cout << "[TEXT_MESSAGE] message size: " << bytes_transferred << std::endl;
-        // async_read(*session.socket, asio::buffer(session.data, sizeof(message_header)), std::bind(read_header_handler, session, _1, _2));
 
-        session_read(session);
+        uint32_t msg_size_host = ntohl(session->message_size);
+        std::cout << "message size: " << msg_size_host << std::endl;
+
+        async_read(session->socket, 
+            asio::buffer(session->data, sizeof(char) * msg_size_host), 
+            std::bind(read_text_message_body_handler, session, _1, _2));
     }
     else
     {
@@ -66,15 +96,17 @@ void read_header_handler(Session *session, const asio::error_code &error, std::s
     {
         std::cout << "[HEADER] bytes read: " << bytes_transferred << std::endl;
 
-        uint32_t *header_net = reinterpret_cast<uint32_t *>(session->data);
-        uint32_t header_host = ntohl(*((uint32_t *)header_net));
+        uint32_t header_host = ntohl(session->id_buffer);
         std::cout << "header type: " << header_host << std::endl;
 
         switch (header_host)
         {
         case TEXT_MESSAGE:
             {
-                async_read(*session->socket, asio::buffer(session->data, sizeof(uint32_t)), std::bind(read_text_message_header_handler, session, _1, _2));
+                std::cout << "Processing TEXT_MESSAGE..." << std::endl;
+                async_read(session->socket, 
+                    asio::buffer(&session->message_size, sizeof(uint32_t)), 
+                    std::bind(read_text_message_header_handler, session, _1, _2));
                 break;
             }
         default:
@@ -93,22 +125,25 @@ void read_header_handler(Session *session, const asio::error_code &error, std::s
 
 void session_read(Session *session)
 {
+    std::cout << "session_read: " << session->socket.remote_endpoint().address() << std::endl;
+
     // read the header:
-    async_read(*session->socket, asio::buffer(session->data, sizeof(message_header)), std::bind(read_header_handler, session, _1, _2));
+    async_read(session->socket, 
+        asio::buffer(&session->id_buffer, sizeof(uint32_t)),
+        std::bind(read_header_handler, session, _1, _2));
 }
 
 
 void start_accept();
 
-void accept_handler(Session *session, asio::ip::tcp::socket *socket, const asio::error_code& error)
+void accept_handler(const asio::error_code& error, asio::ip::tcp::socket socket)
 {
-    std::cout << "accept_handler()" << std::endl;
-
     if (!error)
     {
-        std::cout << "accepted connection!" << std::endl;
+        std::cout << "New connection from: " << socket.remote_endpoint().address() << std::endl;
+        sessions.push_back({.socket = std::move(socket)});
 
-        session_read(session);
+        session_read(&sessions.back());
     }
 
     start_accept();
@@ -117,13 +152,15 @@ void accept_handler(Session *session, asio::ip::tcp::socket *socket, const asio:
 void start_accept()
 {
     std::cout << "start_accept()" << std::endl;
+    acceptor->async_accept(std::bind(accept_handler, _1, _2));
 
-    asio::ip::tcp::socket *socket = new asio::ip::tcp::socket(io_context);
-    sessions.push_back({ socket });
-
-    std::cout << "NEW SESSION: " << (uintptr_t)sessions.back().data << std::endl;
-    
-    acceptor->async_accept(*socket, std::bind(accept_handler, &sessions.back(), socket, _1));
+    // asio::ip::tcp::socket *socket = new asio::ip::tcp::socket(io_context);
+    // // Session new_session = ;
+    // sessions.push_back({ 
+    //     .socket = socket,
+    //     .id_buffer = 0 });
+    // std::cout << "NEW SESSION: socket: " << (uintptr_t)sessions.back().socket << std::endl;
+    // acceptor->async_accept(*socket, std::bind(accept_handler, &sessions.back(), _1));
 }
 
 
