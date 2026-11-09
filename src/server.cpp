@@ -18,6 +18,10 @@ using asio::ip::tcp;
 
 // #include "memory.cpp"
 
+
+constexpr uint32_t MAX_MESSAGE_BYTES = 256 * 1024 * 1024; // 256 MB for now
+
+
 // Session stuff:
 struct Session
 {
@@ -26,7 +30,7 @@ struct Session
     uint32_t id_buffer;
 
     uint32_t message_size;
-    char data[1024];
+    std::vector<char> data;
 };
 
 
@@ -51,17 +55,55 @@ void disconnet_client(Session *session)
 }
 
 
-void read_text_message_body_handler(Session *session, const asio::error_code &error, std::size_t bytes_transferred)
+void handle_message_body(Session *session)
 {
-    std::cout << "read_text_message_body_handler..." << std::endl;
+    uint32_t header_host = ntohl(session->id_buffer);
+    switch (header_host)
+    {
+    case TEXT_MESSAGE:
+        {
+            std::string text(session->data.begin(), session->data.end());
+            std::cout << "RECEIVED MESSAGE: |" << text << "|" << std::endl;
+            session_read(session);
+            break;
+        }
+    case VDB_GRID:
+        {
+            try
+            {
+                openvdb::FloatGrid::Ptr grid = read_grid_from_buffer(session->data);
+                if (!grid)
+                {
+                    std::cout << "VDB_GRID payload did not contain a grid." << std::endl;
+                    disconnet_client(session);
+                    return;
+                }
+                std::cout << "[VDB_GRID] payload " << session->message_size
+                          << " bytes, grid mem " << grid->memUsage() << std::endl;
+                session_read(session);
+            }
+            catch (const std::exception &error)
+            {
+                std::cout << "VDB_GRID decode failed: " << error.what() << std::endl;
+                disconnet_client(session);
+            }
+            break;
+        }
+    default:
+        {
+            disconnet_client(session);
+            break;
+        }
+    }
+}
 
+
+void read_message_body_handler(Session *session, const asio::error_code &error, std::size_t bytes_transferred)
+{
     if (!error)
     {
-        std::cout << "[TEXT_MESSAGE] message body size: " << bytes_transferred << std::endl;
-
-        std::cout << "RECEIVED MESSAGE: |" << session->data << "|" << std::endl;
-
-        session_read(session);
+        std::cout << "message body size: " << bytes_transferred << std::endl;
+        handle_message_body(session);
     }
     else
     {
@@ -69,63 +111,70 @@ void read_text_message_body_handler(Session *session, const asio::error_code &er
     }
 }
 
-void read_text_message_header_handler(Session *session, const asio::error_code &error, std::size_t bytes_transferred)
+void read_message_size_handler(Session *session, const asio::error_code &error, std::size_t bytes_transferred)
 {
-    std::cout << "read_text_message_header_handler..." << std::endl;
-
-    if (!error)
-    {
-        std::cout << "[TEXT_MESSAGE] message size: " << bytes_transferred << std::endl;
-
-        uint32_t msg_size_host = ntohl(session->message_size);
-        std::cout << "message size: " << msg_size_host << std::endl;
-
-        async_read(session->socket, 
-            asio::buffer(session->data, sizeof(char) * msg_size_host), 
-            std::bind(read_text_message_body_handler, session, _1, _2));
-    }
-    else
+    if (error)
     {
         disconnet_client(session);
+        return;
     }
+
+    uint32_t msg_size_host = ntohl(session->message_size);
+    std::cout << "message size: " << msg_size_host << std::endl;
+
+    if (msg_size_host >= MAX_MESSAGE_BYTES)
+    {
+        std::cout << "message exceeds " << MAX_MESSAGE_BYTES << " bytes... disconnecting!" << std::endl;
+        disconnet_client(session);
+        return;
+    }
+
+    if (msg_size_host == 0) 
+    {
+        handle_message_body(session);
+        return;
+    }
+
+    async_read(session->socket, 
+        asio::buffer(session->data, sizeof(char) * msg_size_host), 
+        std::bind(read_message_body_handler, session, _1, _2));
 }
 
 void read_header_handler(Session *session, const asio::error_code &error, std::size_t bytes_transferred)
 {
-    if (!error)
-    {
-        std::cout << "[HEADER] bytes read: " << bytes_transferred << std::endl;
-
-        uint32_t header_host = ntohl(session->id_buffer);
-        std::cout << "header type: " << header_host << std::endl;
-
-        switch (header_host)
-        {
-        case TEXT_MESSAGE:
-            {
-                std::cout << "Processing TEXT_MESSAGE..." << std::endl;
-                async_read(session->socket, 
-                    asio::buffer(&session->message_size, sizeof(uint32_t)), 
-                    std::bind(read_text_message_header_handler, session, _1, _2));
-                break;
-            }
-        default:
-            {
-                std::cout << "non-supported protocol... disconnecting!" << std::endl;
-                disconnet_client(session);
-                break;
-            }
-        }
-    }
-    else
+    if (error)
     {
         disconnet_client(session);
+        return;
+    }
+
+    std::cout << "[HEADER] bytes read: " << bytes_transferred << std::endl;
+
+    uint32_t header_host = ntohl(session->id_buffer);
+    std::cout << "header type: " << header_host << std::endl;
+
+    switch (header_host)
+    {
+    case TEXT_MESSAGE:
+    case VDB_GRID:
+        {
+            async_read(session->socket, 
+                asio::buffer(&session->message_size, sizeof(uint32_t)), 
+                std::bind(read_message_size_handler, session, _1, _2));
+            break;
+        }
+    default:
+        {
+            std::cout << "non-supported protocol... disconnecting!" << std::endl;
+            disconnet_client(session);
+            break;
+        }
     }
 }
 
 void session_read(Session *session)
 {
-    std::cout << "session_read: " << session->socket.remote_endpoint().address() << std::endl;
+    // std::cout << "session_read: " << session->socket.remote_endpoint().address() << std::endl;
 
     // read the header:
     async_read(session->socket, 
@@ -141,7 +190,10 @@ void accept_handler(const asio::error_code& error, asio::ip::tcp::socket socket)
     if (!error)
     {
         std::cout << "New connection from: " << socket.remote_endpoint().address() << std::endl;
-        sessions.push_back({.socket = std::move(socket)});
+        sessions.push_back({
+            .socket = std::move(socket),
+            .data = std::vector<char>(MAX_MESSAGE_BYTES)
+        });
 
         session_read(&sessions.back());
     }
@@ -168,8 +220,7 @@ void start_accept()
 
 int main(int argc, char **argv)
 {
-    // // test for now: 
-    // openvdb::initialize();
+    openvdb::initialize();
 
     // test_grid = openvdb::FloatGrid::create();
     // openvdb::FloatGrid::TreeType& tree = test_grid->tree();

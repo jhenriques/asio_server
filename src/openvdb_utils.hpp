@@ -59,7 +59,7 @@ bool write_grid_to_buffer(openvdb::FloatGrid::Ptr grid, std::vector<char> &buffe
     return true;
 }
 
-openvdb::FloatGrid::Ptr read_grid_from_buffer(std::vector<char> &buffer)
+openvdb::FloatGrid::Ptr read_grid_from_buffer(const std::vector<char> &buffer)
 {
     std::istringstream istr(std::string(buffer.begin(), buffer.end()), std::ios_base::binary);
 
